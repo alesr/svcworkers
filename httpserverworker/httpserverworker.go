@@ -1,0 +1,116 @@
+package httpserverworker
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"sync/atomic"
+	"time"
+
+	"github.com/alesr/svc"
+)
+
+var (
+	_ svc.Worker   = (*Worker)(nil)
+	_ svc.Aliver   = (*Worker)(nil)
+	_ svc.Healther = (*Worker)(nil)
+)
+
+type Option func(*Worker)
+
+func WithReadTimeout(d time.Duration) Option     { return func(w *Worker) { w.readTimeout = d } }
+func WithWriteTimeout(d time.Duration) Option    { return func(w *Worker) { w.writeTimeout = d } }
+func WithIdleTimeout(d time.Duration) Option     { return func(w *Worker) { w.idleTimeout = d } }
+func WithShutdownTimeout(d time.Duration) Option { return func(w *Worker) { w.shutdownTimeout = d } }
+func WithReadHeaderTimeout(d time.Duration) Option {
+	return func(w *Worker) { w.readHeaderTimeout = d }
+}
+
+type Worker struct {
+	addr    string
+	handler http.Handler
+	server  *http.Server
+	logger  *slog.Logger
+
+	readTimeout       time.Duration
+	readHeaderTimeout time.Duration
+	writeTimeout      time.Duration
+	idleTimeout       time.Duration
+	shutdownTimeout   time.Duration
+
+	running atomic.Bool
+	stopped atomic.Bool
+}
+
+func New(addr string, handler http.Handler, opts ...Option) *Worker {
+	w := &Worker{
+		addr:              addr,
+		handler:           handler,
+		readHeaderTimeout: 5 * time.Second,
+		shutdownTimeout:   10 * time.Second,
+	}
+	for _, opt := range opts {
+		opt(w)
+	}
+	return w
+}
+
+func (w *Worker) Init(logger *slog.Logger) error {
+	if logger != nil {
+		w.logger = logger.With("worker", "http-server")
+	}
+	w.server = &http.Server{
+		Addr:              w.addr,
+		Handler:           w.handler,
+		ReadTimeout:       w.readTimeout,
+		ReadHeaderTimeout: w.readHeaderTimeout,
+		WriteTimeout:      w.writeTimeout,
+		IdleTimeout:       w.idleTimeout,
+	}
+	return nil
+}
+
+func (w *Worker) Run() error {
+	w.running.Store(true)
+	defer w.running.Store(false)
+
+	if w.logger != nil {
+		w.logger.Info("listening", "address", w.addr)
+	}
+
+	if err := w.server.ListenAndServe(); err != http.ErrServerClosed {
+		return err
+	}
+	return nil
+}
+
+func (w *Worker) Terminate() error {
+	if !w.stopped.CompareAndSwap(false, true) {
+		return nil
+	}
+	w.running.Store(false)
+
+	ctx, cancel := context.WithTimeout(context.Background(), w.shutdownTimeout)
+	defer cancel()
+
+	if err := w.server.Shutdown(ctx); err != nil {
+		return fmt.Errorf("http shutdown: %w", err)
+	}
+	return nil
+}
+
+func (w *Worker) Alive() error {
+	if !w.running.Load() {
+		return errors.New("http server not running")
+	}
+	return nil
+}
+
+func (w *Worker) Healthy() error {
+	if !w.running.Load() {
+		return errors.New("http server not running")
+	}
+	return nil
+}
