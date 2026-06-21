@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -32,6 +34,8 @@ type Worker struct {
 	addr    string
 	handler http.Handler
 	server  *http.Server
+	lis     net.Listener
+	lisMu   sync.Mutex
 	logger  *slog.Logger
 
 	readTimeout       time.Duration
@@ -73,14 +77,23 @@ func (w *Worker) Init(logger *slog.Logger) error {
 }
 
 func (w *Worker) Run() error {
+	lis, err := net.Listen("tcp", w.addr)
+	if err != nil {
+		return fmt.Errorf("http listen: %w", err)
+	}
+
+	w.lisMu.Lock()
+	w.lis = lis
+	w.lisMu.Unlock()
+
 	w.running.Store(true)
 	defer w.running.Store(false)
 
 	if w.logger != nil {
-		w.logger.Info("listening", "address", w.addr)
+		w.logger.Info("listening", "address", lis.Addr().String())
 	}
 
-	if err := w.server.ListenAndServe(); err != http.ErrServerClosed {
+	if err := w.server.Serve(lis); err != http.ErrServerClosed {
 		return err
 	}
 	return nil
@@ -109,8 +122,18 @@ func (w *Worker) Alive() error {
 }
 
 func (w *Worker) Healthy() error {
-	if !w.running.Load() {
-		return errors.New("http server not running")
+	w.lisMu.Lock()
+	lis := w.lis
+	w.lisMu.Unlock()
+
+	if lis == nil {
+		return errors.New("http server not accepting connections")
 	}
+
+	conn, err := net.DialTimeout("tcp", lis.Addr().String(), 2*time.Second)
+	if err != nil {
+		return fmt.Errorf("http server not accepting connections: %w", err)
+	}
+	conn.Close()
 	return nil
 }

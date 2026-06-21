@@ -7,6 +7,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	gogrpc "google.golang.org/grpc"
 	"google.golang.org/grpc/health"
@@ -106,9 +107,19 @@ func (w *Worker) Alive() error {
 }
 
 func (w *Worker) Healthy() error {
-	if !w.running.Load() {
-		return errors.New("gRPC server not running")
+	w.lisMu.Lock()
+	lis := w.lis
+	w.lisMu.Unlock()
+
+	if lis == nil {
+		return errors.New("gRPC server not accepting connections")
 	}
+
+	conn, err := net.DialTimeout("tcp", lis.Addr().String(), 2*time.Second)
+	if err != nil {
+		return fmt.Errorf("gRPC server not accepting connections: %w", err)
+	}
+	conn.Close()
 	return nil
 }
 
