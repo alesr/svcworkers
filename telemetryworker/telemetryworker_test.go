@@ -9,6 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/alesr/svcworkers/telemetryworker"
 )
@@ -49,6 +52,31 @@ func TestTelemetryWorker(t *testing.T) {
 		require.NoError(t, err)
 
 		endpoint := fmt.Sprintf("%s:%s", host, port.Port())
+
+		require.Eventually(t, func() bool {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			conn, err := grpc.NewClient(endpoint,
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+			)
+			if err != nil {
+				return false
+			}
+
+			defer conn.Close()
+			conn.Connect()
+
+			for {
+				s := conn.GetState()
+				if s == connectivity.Ready {
+					return true
+				}
+
+				if !conn.WaitForStateChange(ctx, s) {
+					return false
+				}
+			}
+		}, 15*time.Second, 200*time.Millisecond, "collector gRPC not ready")
 
 		w := telemetryworker.New(true, endpoint, "test-svc",
 			telemetryworker.WithMetricInterval(5*time.Second),
