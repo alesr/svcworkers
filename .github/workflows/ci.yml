@@ -73,9 +73,21 @@ jobs:
       - name: go test
         working-directory: ${{ matrix.module }}
         run: go test -v -count=1 -coverprofile=coverage.txt -race ./...
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-${{ matrix.module }}
+          path: ${{ matrix.module }}/coverage.txt
+
+  coverage:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+      - uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: alesr/svcworkers
-          files: ${{ matrix.module }}/coverage.txt
+          directory: .
+          fail_ci_if_error: true
