@@ -1,5 +1,7 @@
 # svcworkers
 
+[![codecov](https://codecov.io/gh/alesr/svcworkers/graph/badge.svg?token=KEpvy1bjzn)](https://codecov.io/gh/alesr/svcworkers)
+
 Reusable [svc.Worker](https://github.com/alesr/svc) implementations for Go services.
 
 Each worker is a standalone Go module with its own `go.mod`.
