@@ -117,3 +117,5 @@ func (w *Worker) Healthy() error {
 	defer cancel()
 	return w.db.PingContext(ctx)
 }
+
+func (w *Worker) DB() *sql.DB { return w.db }

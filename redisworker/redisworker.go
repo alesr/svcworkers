@@ -122,3 +122,5 @@ func (w *Worker) Healthy() error {
 	}
 	return nil
 }
+
+func (w *Worker) Client() *redis.Client { return w.client }
